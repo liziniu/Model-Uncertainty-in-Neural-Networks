@@ -43,7 +43,7 @@ def load_data():
 def get_session():
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
-    config.gpu_options.per_process_gpu_memory_fraction = 0.6
+    # config.gpu_options.per_process_gpu_memory_fraction = 0.6
     sess = tf.Session(config=config)
     return sess
 

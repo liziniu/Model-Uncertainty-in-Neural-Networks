@@ -1,6 +1,6 @@
 import tensorflow as tf
-from model.default import get_config
-from model.model import Model
+from model1.default import get_config
+from model1.model import Model
 from utli import load_data, get_session
 
 sess = get_session()

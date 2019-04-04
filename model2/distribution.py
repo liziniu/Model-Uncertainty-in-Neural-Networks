@@ -169,25 +169,18 @@ class BNN:
         self.logits_train, self.logits_act = self._build_network(self.x_train_phd, self.x_act_phd)
         self.outputs_act = tf.nn.softmax(self.logits_act)
 
-    @property
-    def loglikehood_op(self):
-        # Note: only for train
-        likehood_op = tf.nn.softmax_cross_entropy_with_logits(labels=self.y_phd, logits=self.logits_train)
-        return tf.reduce_mean(likehood_op)
+        loglikehood_op = tf.nn.softmax_cross_entropy_with_logits(labels=self.y_phd, logits=self.logits_train)
+        self.loglikehood_op = tf.reduce_sum(loglikehood_op)/self.sample_size
 
-    @property
-    def logp_op(self):
         logp_op = []
         for i in range(1, self.num_layers+1):
             logp_op.append(getattr(self, "l%s"%i).logp_op)
-        return tf.reduce_sum(logp_op)/self.sample_size
+        self.logp_op = tf.reduce_sum(logp_op)/self.sample_size
 
-    @property
-    def logq_op(self):
         logq_op = []
         for i in range(1, self.num_layers+1):
             logq_op.append(getattr(self, "l%s"%i).logq_op)
-        return tf.reduce_sum(logq_op)/self.sample_size
+        self.logq_op = tf.reduce_sum(logq_op)/self.sample_size
 
     # @property
     # def sample_epsilon_op(self):

@@ -28,6 +28,24 @@ class Model:
 
         self._build_layer()
         self.opt = tf.train.AdamOptimizer(self.lr)
+
+        loss = tf.constant(0.0)
+        i = tf.constant(0)
+
+        logits_act = self._forward(training=False)
+        self.outputs = tf.argmax(logits_act, axis=-1)
+
+        logits_train = self._forward(training=True)
+
+        def cond(i, *args):
+            return tf.less(i, self.sample_times)
+
+        def iter(i, loss):
+            y = logits_train
+            loss += self._loss_ER(y) + self._loss_KL()
+            return i+1, loss
+        _, loss = tf.while_loop(cond=cond, body=iter, loop_vars=[i, loss])
+        self.loss = loss / self.sample_times
         self.train_op = self.opt.minimize(self.loss)
 
         if not os.path.exists("logs/model"):
@@ -122,20 +140,20 @@ class Model:
                                 self.multi_ratio)
         return loss / self.sample_size
 
-    @property
-    def loss(self):
-        loss = tf.constant(0.0)
-        i = tf.constant(0)
-
-        def cond(i, *args):
-            return tf.less(i, self.sample_times)
-
-        def iter(i, loss):
-            y = self._forward(training=True)
-            loss += self._loss_ER(y) + self._loss_KL()
-            return i+1, loss
-        _, loss = tf.while_loop(cond=cond, body=iter, loop_vars=[i, loss])
-        return loss / self.sample_times
+    # @property
+    # def loss(self):
+    #     loss = tf.constant(0.0)
+    #     i = tf.constant(0)
+    #
+    #     def cond(i, *args):
+    #         return tf.less(i, self.sample_times)
+    #
+    #     def iter(i, loss):
+    #         y = self._forward(training=True)
+    #         loss += self._loss_ER(y) + self._loss_KL()
+    #         return i+1, loss
+    #     _, loss = tf.while_loop(cond=cond, body=iter, loop_vars=[i, loss])
+    #     return loss / self.sample_times
 
     @property
     def loss_ER(self):
@@ -151,11 +169,6 @@ class Model:
         for i in range(self.sample_times):
             loss += self._loss_KL()
         return loss / self.sample_times
-
-    @property
-    def outputs(self):
-        logits = self._forward(training=False)
-        return tf.argmax(logits, axis=-1)
 
     def predict(self, x):
         return self.sess.run(self.outputs, feed_dict={self.input: x})
