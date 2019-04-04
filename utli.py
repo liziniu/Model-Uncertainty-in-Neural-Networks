@@ -1,7 +1,7 @@
 import numpy as np
 from tensorflow.examples.tutorials.mnist import input_data
 import time
-
+import tensorflow as tf
 
 def min2darray(x):
     if isinstance(x, tuple) or isinstance(x, list):
@@ -39,6 +39,13 @@ def load_data():
     print("-"*30)
     return x_train, x_test, y_train, y_test
 
+
+def get_session():
+    config = tf.ConfigProto()
+    config.gpu_options.allow_growth = True
+    config.gpu_options.per_process_gpu_memory_fraction = 0.6
+    sess = tf.Session(config=config)
+    return sess
 
 if __name__ == "__main__":
     load_data()

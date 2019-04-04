@@ -1,9 +1,9 @@
 import tensorflow as tf
 from model.default import get_config
 from model.model import Model
-from utli import load_data
+from utli import load_data, get_session
 
-sess = tf.Session()
+sess = get_session()
 para = get_config()
 model = Model(sess, para)
 

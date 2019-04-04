@@ -30,9 +30,11 @@ class Model:
         self.opt = tf.train.AdamOptimizer(self.lr)
         self.train_op = self.opt.minimize(self.loss)
 
-        if not os.path.exists("logs"):
-            os.makedirs("logs")
-        self.logger = open("logs/record.txt", "w")
+        if not os.path.exists("logs/model"):
+            os.makedirs("logs/model")
+        self.logger = open("logs/model/record.txt", "w")
+
+        self.saver = tf.train.Saver()
 
     def _get_params(self, prefix, shape):
         if "weight" in prefix:
@@ -196,3 +198,4 @@ class Model:
                 y_valid_pred = self.predict(x_valid)
                 error = np.mean(y_valid_pred != y_valid_)
                 print("======Epoch:{}|Acc:{:.4f}=====".format(i, 1-error))
+        self.saver.save(self.sess, "logs/model/")
