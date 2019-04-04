@@ -1,7 +1,7 @@
 import numpy as np
 from tensorflow.examples.tutorials.mnist import input_data
-import time
 import tensorflow as tf
+
 
 def min2darray(x):
     if isinstance(x, tuple) or isinstance(x, list):
