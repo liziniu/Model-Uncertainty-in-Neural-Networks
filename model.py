@@ -20,8 +20,8 @@ class Model:
         self.MNN = MNN(self.sess, nin, nout, num_layers, num_units, **prior_kwargs)
 
         self.complexity_loss = self.BNN.logp_op - self.MNN.logp_op
-        self.likehood_loss = -self.BNN.loglikehood_op
-        self.loss = self.complexity_loss + self.likehood_loss       # todo: batch reweight
+        self.neglikehood_loss = self.BNN.loglikehood_op
+        self.loss = self.complexity_loss + self.neglikehood_loss       # todo: batch reweight
 
         self.opt = tf.train.AdamOptimizer(lr)
         self.mu_var = self.BNN.get_mu_var()     # use for apply gradients
@@ -30,9 +30,9 @@ class Model:
         self.summary(self.rho_var, "rho_var")
         self.mu_phd = self.BNN.get_mu_phd()
         self.rho_phd = self.BNN.get_rho_phd()
-        self.w_phd = self.BNN.get_para_phd()
+        self.weight_var = self.BNN.get_weight_var()
 
-        self.grads_to_w = tf.gradients(self.loss, self.w_phd)
+        self.grads_to_w = tf.gradients(self.loss, self.weight_var)
         self.grads_to_mu = tf.gradients(self.loss, self.mu_phd)
         self.grads_to_rho = tf.gradients(self.loss, self.rho_phd)
         self.final_grads_to_mu, self.final_grads_to_rho = [], []
@@ -61,27 +61,29 @@ class Model:
             os.makedirs("logs")
         self.logger = open("logs/record.txt", "w")
 
-    def predict(self):
-        pass
+    def predict(self, x, one_hot=False):
+        return self.BNN.predict(x, one_hot)
 
     def train(self, x, y):
         # 1. sample epsilon
         # 2. calculate mu and rho
         # 3. forward and backward get gradients
         # 4. apply gradients
-        num_samples = len(x)
+        x_train, y_train, x_valid, y_valid = x[:-5000], y[:-5000], x[-5000:], y[-5000:]
+        y_valid_ = np.argmax(y_valid, axis=-1)
+        num_samples = len(x_train)
 
         def shuffle(x, y):
             perm = np.random.permutation(len(x))
             return x[perm], y[perm]
 
-        for i in range(1):
-            x, y = shuffle(x, y)
+        for i in range(self.epochs):
+            x_train, y_train = shuffle(x_train, y_train)
             for j in range(0, num_samples, self.batch_size):
                 tstart = time.time()
                 start = j
                 end = start + self.batch_size
-                batch_x, batch_y = x[start: end], y[start: end]
+                batch_x, batch_y = x_train[start: end], y_train[start: end]
                 if end > num_samples:
                     batch_x = np.concatenate([batch_x, x[:end%num_samples]], axis=0)
                     batch_y = np.concatenate([batch_y, y[:end%num_samples]], axis=0)
@@ -89,15 +91,21 @@ class Model:
                 mu, rho = self.get_mu(), self.get_rho()
                 feed_dict = self._make_feed(batch_x, batch_y, mu, rho, epsilon)
                 complexity_loss, likehood_loss, loss, _ = self.sess.run([
-                    self.complexity_loss, self.likehood_loss, self.loss, self.train_op], feed_dict=feed_dict)
+                    self.complexity_loss, self.neglikehood_loss, self.loss, self.train_op], feed_dict=feed_dict)
                 tend = time.time()
 
-                if j % (self.batch_size*10) == 0:
-                    memory_str = "Epoch:{:.2f}%|Complexity:{:.2f}|Likehood:{:.2f}|Loss:{:.2f}|Time:{:.2f}".format(
-                        end/num_samples*100, complexity_loss, likehood_loss, loss, tend-tstart)
+                if j % (self.batch_size*20) == 0:
+                    memory_str = "Epoch_{}:{:.2f}%|Complexity:{:.4f}|Likehood:{:.4f}|Loss:{:.4f}|Time:{:.2f}".format(
+                        i, end/num_samples*100, complexity_loss, likehood_loss, loss, tend-tstart)
                     print(memory_str)
                     self.logger.write(memory_str+"\n")
-        self.saver.save(self.sess, "logs/")
+            y_valid_pred = self.predict(x_valid, one_hot=False)
+
+            # print(np.float(y_valid_pred != y_valid))
+
+            error = np.mean((y_valid_pred != y_valid_).astype(np.float32))
+            print("======Epoch:{}|Acc:{:.4f}=====".format(i, 1-error))
+        # self.saver.save(self.sess, "logs/")
 
     def sample_epsilon(self):
         return self.BNN.sample_epsilon()
@@ -126,7 +134,7 @@ class Model:
         return w
 
     def _make_feed(self, x, y, mu, rho, epsilon):
-        feed_dict = {self.BNN.x_phd: x, self.BNN.y_phd: y}
+        feed_dict = {self.BNN.x_train_phd: np.expand_dims(x, 1), self.BNN.y_phd: y}
         for i in range(len(epsilon)):
             suffix = "w" if i % 2 == 0 else "b"
             feed_dict[getattr(getattr(self.BNN, "l%s"%((i+2)//2)), "eps_%s_phd"%suffix)] = epsilon[i]

@@ -3,6 +3,16 @@ from tensorflow.examples.tutorials.mnist import input_data
 import time
 
 
+def min2darray(x):
+    if isinstance(x, tuple) or isinstance(x, list):
+        x = np.asarray(x)
+    if len(x.shape) == 1:
+        x = np.expand_dims(x, axis=0)
+    if len(x.shape) > 2:
+        print("warning!input shape:{} can not be transformed into 2d array!".format(x.shape))
+    return x
+
+
 def softplus(x):
     return np.log(1+np.exp(x))
 
