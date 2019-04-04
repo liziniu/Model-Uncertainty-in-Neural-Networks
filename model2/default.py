@@ -9,11 +9,11 @@ def get_config():
         num_units=64,
         batch_size=128,
         activation=tf.nn.relu,
-        lr=1e-4,
+        lr=1e-3,
         epochs=200,
         mu1=0.0,
-        rho1=-3.0,
+        std1=0.0,
         mu2=0.0,
-        rho2=1.0,
+        std2=-6.0,
         pi=0.5
     )

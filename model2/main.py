@@ -1,6 +1,11 @@
 from model import Model
+from model2.default import get_config
 from utli import load_data
-from default import get_config
+
+
+# ====================
+# Deprecated
+# ====================
 
 
 def main():

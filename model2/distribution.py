@@ -2,24 +2,26 @@ import tensorflow as tf
 import numpy as np
 from utli import softplus, min2darray
 
+# ====================
+# Deprecated
+# ====================
 
-def build_gaussian(nin, nout, mu, rho, batch_size):
-    std = softplus(rho)
+
+def build_gaussian(nin, nout, mu, std, batch_size):
     return tf.random_normal(shape=[batch_size, nin, nout], mean=mu, stddev=std, name="gaussian_prior")
 
 
-def gaussian_logp(mu, rho, x):
-    num_sample = np.prod(x.get_shape().as_list())
-    logp1 = -(tf.log(tf.sqrt(2 * np.pi)) + tf.log(tf.nn.softplus(rho))) - \
-            tf.reduce_mean(tf.square(x - mu) / (2 * tf.square(tf.nn.softplus(rho))))
+def gaussian_logp(mu, std, x):
+    # num_sample = np.prod(x.get_shape().as_list())
+    logp1 = -(tf.log(tf.sqrt(2 * np.pi)) + tf.log(std)) - tf.reduce_mean(tf.square(x - mu) / (2 * tf.square(std)))
     return logp1
 
 
 class MixGaussianLayer:
-    def __init__(self, nin, nout, mu1, rho1, mu2, rho2, pi, batch_size):
-        self.pd1 = build_gaussian(nin, nout, mu1, rho1, batch_size)
+    def __init__(self, nin, nout, mu1, std1, mu2, std2, pi, batch_size):
+        self.pd1 = build_gaussian(nin, nout, mu1, std1, batch_size)
         # self.pd1_act = build_gaussian(nin, nout, mu1, rho1, 1)
-        self.pd2 = build_gaussian(nin, nout, mu2, rho2, batch_size)
+        self.pd2 = build_gaussian(nin, nout, mu2, std2, batch_size)
         # self.pd2_act = build_gaussian(nin, nout, mu2, rho2, 1)
 
         self.para = pi * self.pd1 + (1-pi)*self.pd2
@@ -27,8 +29,8 @@ class MixGaussianLayer:
 
         # only for train
         self.logp_op = tf.log(
-            pi*tf.exp(gaussian_logp(mu1, rho1, self.para))
-            +(1-pi)*tf.exp(gaussian_logp(mu2, rho2, self.para))
+            pi*tf.exp(gaussian_logp(mu1, std1, self.para))
+            +(1-pi)*tf.exp(gaussian_logp(mu2, std2, self.para))
         )
 
 
@@ -76,13 +78,13 @@ class BayesGaussianLayer:
     def logp_op(self):
         # only for log prob statistic
         # batch_size = self.w_phd.get_shape().as_list()
-        batch_size = tf.shape(self._w)[0]
-        logw = -np.log(2*np.pi) - tf.reduce_mean(tf.log(self.std_w)) - tf.reduce_mean(
-                           tf.square(self._w-tf.tile(self.mu_w[None, :, :], [batch_size, 1, 1])) /
+        batch_size = self.batch_size
+        logw = -tf.log(tf.sqrt(2*np.pi)) - tf.reduce_mean(tf.log(self.std_w)) - tf.reduce_mean(
+                           tf.square(self.w-tf.tile(self.mu_w[None, :, :], [batch_size, 1, 1])) /
                            (2*tf.square(tf.tile(self.std_w[None, :, :], [batch_size, 1, 1])))
                        )
-        logb = -np.log(2*np.pi) - tf.reduce_mean(tf.log(self.std_b)) - tf.reduce_mean(
-                           tf.square(self._b - tf.tile(self.mu_b[None, :], [batch_size, 1])) /
+        logb = -tf.log(tf.sqrt(2*np.pi)) - tf.reduce_mean(tf.log(self.std_b)) - tf.reduce_mean(
+                           tf.square(self.b - tf.tile(self.mu_b[None, :], [batch_size, 1])) /
                            (2*tf.square(tf.tile(self.std_b[None, :], [batch_size, 1])))
                        )
         logp = logw + logb
@@ -93,15 +95,6 @@ class BayesGaussianLayer:
 
     def get_rho_var(self):
         return [self.rho_w, self.rho_b]
-
-    def get_mu_phd(self):
-        return [self.mu_w_phd, self.mu_b_phd]
-
-    def get_rho_phd(self):
-        return [self.rho_w_phd, self.rho_b_phd]
-
-    def get_eps_phd(self):
-        return [self.eps_w_phd, self.eps_b_phd]
 
     def get_weight_var(self):
         return [self.w, self.b]
@@ -120,25 +113,10 @@ class BayesGaussianLayer:
             self.eps_b = tf.random_normal(shape=[self.batch_size, self.nout], mean=0, stddev=1, name="eps_b")
 
             # use for sampling to calculate log prob
-            self._w = self.eps_w * tf.tile(self.std_w[None, :, :], [self.batch_size, 1, 1]) + \
+            self.w = self.eps_w * tf.tile(self.std_w[None, :, :], [self.batch_size, 1, 1]) + \
                      tf.tile(self.mu_w[None, :, :], [self.batch_size, 1, 1])     # [None, nin, nout]
-            self._b = self.eps_b * tf.tile(self.std_b[None, :], [self.batch_size, 1]) +\
+            self.b = self.eps_b * tf.tile(self.std_b[None, :], [self.batch_size, 1]) +\
                      tf.tile(self.mu_b[None, :], [self.batch_size, 1])       # [None, nout]
-
-            # use for forward model
-            # we need mu, rho, epsilon, phd to calculate gradients
-            self.mu_w_phd = tf.placeholder(name="mu_w_phd", shape=[None, self.nin, self.nout], dtype=tf.float32)
-            self.mu_b_phd = tf.placeholder(name="mu_b_phd", shape=[None, self.nout], dtype=tf.float32)
-            self.rho_w_phd = tf.placeholder(name="rho_w_phd", shape=[None, self.nin, self.nout], dtype=tf.float32)
-            self.rho_b_phd = tf.placeholder(name="rho_b_phd", shape=[None, self.nout], dtype=tf.float32)
-            self.eps_w_phd = tf.placeholder(name="eps_w_phd", shape=[None, self.nin, self.nout], dtype=tf.float32)  # use for input
-            self.eps_b_phd = tf.placeholder(name="eps_b_phd", shape=[None, self.nout], dtype=tf.float32)    # use for input
-            # predict directly use w_phd and b_phd with mu_w, mu_b, respectively.
-            # self.w_phd = tf.placeholder(name="w_phd", dtype=tf.float32, shape=[None, self.nin, self.nout])
-            # self.b_phd = tf.placeholder(name="b_phd", dtype=tf.float32, shape=[None, self.nout])
-
-            self.w = self.mu_w_phd + tf.nn.softplus(self.rho_w_phd) * self.eps_w_phd
-            self.b = self.mu_b_phd + tf.nn.softplus(self.rho_b_phd) * self.eps_b_phd
 
             h_train = self.fn(tf.matmul(x_train, self.w) + tf.expand_dims(self.b, 1))
             h_act = self.fn(tf.matmul(x_act, self.mu_w) + self.mu_b)
@@ -192,24 +170,6 @@ class BNN:
             list_w.extend(getattr(self, "l%s"%i).get_weight_var())
         return list_w
 
-    def get_mu_phd(self):
-        list_mu = []
-        for i in range(1, self.num_layers+1):
-            list_mu.extend(getattr(self, "l%s"%i).get_mu_phd())
-        return list_mu
-
-    def get_rho_phd(self):
-        list_rho = []
-        for i in range(1, self.num_layers+1):
-            list_rho.extend(getattr(self, "l%s"%i).get_rho_phd())
-        return list_rho
-
-    def get_eps_phd(self):
-        list_eps = []
-        for i in range(1, self.num_layers+1):
-            list_eps.extend(getattr(self, "l%s"%i).get_eps_phd())
-        return list_eps
-
     def get_mu_var(self):
         list_mu_var = []
         for i in range(1, self.num_layers + 1):
@@ -223,7 +183,7 @@ class BNN:
         return list_rho_var
 
     def predict(self, x, one_hot=True):
-        self.fetch_weight()
+        # self.fetch_weight()
         feed_dict = {self.x_act_phd: min2darray(x)}
         p = self.sess.run(self.outputs_act, feed_dict=feed_dict)
         label_ = np.argmax(p, axis=-1)
@@ -269,7 +229,14 @@ class BNN:
 if __name__ == "__main__":
     sess = tf.Session()
     # mix = MixGaussianLayer(32, 32, 0, 0.53, 1, 2, 0.5, 64)
-    x = tf.zeros(shape=[32, 32, 2], dtype=tf.float32)
-    x = tf.constant([[0.0], [1.0]])
-    print(x)
-    print(sess.run(gaussian_logp(0.0, float(np.log(np.e-1)), x)))
+    # x = tf.zeros(shape=[32, 32, 2], dtype=tf.float32)
+    # x = tf.constant([[0.0], [1.0]])
+    # print(x)
+    # print(sess.run(gaussian_logp(0.0, float(np.log(np.e-1)), x)))
+
+    x_train_phd = tf.placeholder(tf.float32, [None, 1, 1])
+    x_act_phd = tf.placeholder(tf.float32, [None, 1])
+    bnn = BayesGaussianLayer(nin=1, nout=1, activation=tf.nn.relu, scope_name="L1", batch_size=1)
+    bnn(x_train_phd, x_act_phd)
+
+    sess.run(tf.global_variables_initializer())
