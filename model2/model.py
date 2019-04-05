@@ -67,7 +67,8 @@ class Model:
 
         if not os.path.exists("logs/model2"):
             os.makedirs("logs/model2")
-        self.logger = open("logs/model2/record.txt", "w")
+        self.logger = open("logs/model1/record_{}.txt".format(
+            time.strftime('%m_%d_%H_%M_%S', time.localtime(time.time()))), "w")
 
     def predict(self, x, one_hot=False):
         return self.BNN.predict(x, one_hot)

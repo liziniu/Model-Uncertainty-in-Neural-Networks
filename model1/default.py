@@ -13,5 +13,4 @@ def get_config():
         multi_ratio=[0.75, 0.25],
         activation=tf.nn.relu,
         sample_times=3,
-        sample_size=50000,
     )

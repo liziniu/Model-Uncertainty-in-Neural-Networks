@@ -1,4 +1,0 @@
-Epoch_0:0.26%|Logp:-0.0001|Logq:-0.0000|Likehood:0.0089|Loss:0.0090|Acc:0.1562|Time:8.29
-Epoch_0:5.38%|Logp:-0.0001|Logq:-0.0000|Likehood:0.0065|Loss:0.0066|Acc:0.1875|Time:1.15
-Epoch_0:10.50%|Logp:-0.0001|Logq:-0.0000|Likehood:0.0062|Loss:0.0063|Acc:0.2422|Time:1.02
-Epoch_0:15.62%|Logp:-0.0001|Logq:-0.0000|Likehood:0.0061|Loss:0.0062|Acc:0.4141|Time:0.92

@@ -47,5 +47,13 @@ def get_session():
     sess = tf.Session(config=config)
     return sess
 
+
+def update_para(default, args):
+    dic_args = vars(args)
+    for key in dic_args:
+        if key in default:
+            default[key] = dic_args[key]
+    return default
+
 if __name__ == "__main__":
     load_data()

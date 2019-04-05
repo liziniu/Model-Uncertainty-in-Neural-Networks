@@ -2,6 +2,7 @@ import tensorflow as tf
 import numpy as np
 import time
 import os
+from logger import Logger
 
 
 class Model:
@@ -25,34 +26,44 @@ class Model:
         self.num_layers = len(self.layer_shape)
         self.input = tf.placeholder(tf.float32, [None, self.layer_shape[0][0]], name="input")
         self.target = tf.placeholder(tf.float32, [None, self.layer_shape[-1][-1]], name="target")
+        self.batch_weight = tf.placeholder(tf.float32, shape=[], name="batch_weight")
 
         self._build_layer()
         self.opt = tf.train.AdamOptimizer(self.lr)
 
-        loss = tf.constant(0.0)
-        i = tf.constant(0)
-
         logits_act = self._forward(training=False)
         self.outputs = tf.argmax(logits_act, axis=-1)
-
         logits_train = self._forward(training=True)
 
+        self.sample_weight_op = [var["weights"] for var in self.list_weights]
+        self.get_mus_op = [var["mus"] for var in self.list_weights]
+        self.get_rhos_op = [var["rhos"] for var in self.list_weights]
+        # loss
         def cond(i, *args):
             return tf.less(i, self.sample_times)
 
-        def iter(i, loss):
+        def iter_loss(i, loss_KL, loss_ER):
             y = logits_train
-            loss += self._loss_ER(y) + self._loss_KL()
-            return i+1, loss
-        _, loss = tf.while_loop(cond=cond, body=iter, loop_vars=[i, loss])
-        self.loss = loss / self.sample_times
+            loss_KL += self._loss_KL()
+            loss_ER += self._loss_ER(y)
+            return i+1, loss_KL, loss_ER
+        i = tf.constant(0)
+        loss_kl = tf.constant(0.0)
+        loss_er = tf.constant(0.0)
+        _, loss_KL, loss_ER = tf.while_loop(cond=cond, body=iter_loss, loop_vars=[i, loss_kl, loss_er])
+        self.loss = (loss_KL*self.batch_weight + loss_ER)/self.sample_times
+        self.loss_KL = loss_KL/self.sample_times
+        self.loss_ER = loss_ER/self.sample_times
         self.train_op = self.opt.minimize(self.loss)
 
-        if not os.path.exists("logs/model"):
-            os.makedirs("logs/model")
-        self.logger = open("logs/model/record.txt", "w")
+        self.logger = Logger(save_path="logs/model1/", file_type="csv")
 
         self.saver = tf.train.Saver()
+        self.initialize = False
+
+    def load(self, model_path):
+        self.saver.restore(self.sess, model_path)
+        self.initialize = True
 
     def _get_params(self, prefix, shape):
         if "weight" in prefix:
@@ -115,14 +126,14 @@ class Model:
     def _log_q(self, xs, mus, rhos):
         sigmas = tf.log(1 + tf.exp(rhos))
         logqs = tf.log(tf.clip_by_value(self._gaussian(xs, mus, sigmas), 1e-10, 1.0))
-        return tf.reduce_sum(logqs)
+        return tf.reduce_mean(logqs)
 
     def _log_p(self, xs, multi_mu, multi_sigma, multi_ratio):
         p = tf.constant(0.0)
         for i in range(len(multi_ratio)):
             p += multi_ratio[i] * tf.clip_by_value(self._gaussian(xs, multi_mu[i], multi_sigma[i]), 1e-10, 1.0)
         logps = tf.log(p)
-        return tf.reduce_sum(logps)
+        return tf.reduce_mean(logps)
 
     def _loss_KL(self):
         loss = tf.constant(0.0)
@@ -138,43 +149,18 @@ class Model:
                                 self.multi_mu,
                                 self.multi_sigma,
                                 self.multi_ratio)
-        return loss / self.sample_size
-
-    # @property
-    # def loss(self):
-    #     loss = tf.constant(0.0)
-    #     i = tf.constant(0)
-    #
-    #     def cond(i, *args):
-    #         return tf.less(i, self.sample_times)
-    #
-    #     def iter(i, loss):
-    #         y = self._forward(training=True)
-    #         loss += self._loss_ER(y) + self._loss_KL()
-    #         return i+1, loss
-    #     _, loss = tf.while_loop(cond=cond, body=iter, loop_vars=[i, loss])
-    #     return loss / self.sample_times
-
-    @property
-    def loss_ER(self):
-        loss = tf.constant(0.0)
-        for i in range(self.sample_times):
-            y = self._forward(training=True)
-            loss += self._loss_ER(y)
-        return loss / self.sample_times
-
-    @property
-    def loss_KL(self):
-        loss = tf.constant(0.0)
-        for i in range(self.sample_times):
-            loss += self._loss_KL()
-        return loss / self.sample_times
+        return loss
 
     def predict(self, x):
         return self.sess.run(self.outputs, feed_dict={self.input: x})
 
     def train(self, x_train, y_train, x_valid=None, y_valid=None):
+        if not self.initialize:
+            self.sess.run(tf.global_variables_initializer())
+            self.initialize = True
+
         num_samples = len(x_train)
+        num_batch = np.ceil(num_samples/self.batch_size)
         if x_valid is not None and y_valid is not None:
             y_valid_ = np.argmax(y_valid, axis=-1)
 
@@ -185,30 +171,55 @@ class Model:
         for i in range(self.epochs):
             x_train, y_train = shuffle(x_train, y_train)
             for j in range(0, num_samples, self.batch_size):
+                batch_id = j // self.batch_size + 1
+                batch_weight = 2**(num_batch - batch_id)/(2**num_batch - 1)
                 tstart = time.time()
                 start = j
                 end = start + self.batch_size
                 batch_x, batch_y = x_train[start: end], y_train[start: end]
-                # loss_ER, loss_KL, loss, _ = self.sess.run(
-                #     [self.loss_ER, self.loss_KL, self.loss, self.train_op],
-                #     feed_dict={self.input: batch_x, self.target: batch_y})
-                loss, _ = self.sess.run(
-                    [self.loss, self.train_op],
-                    feed_dict={self.input: batch_x, self.target: batch_y})
+                loss_ER, loss_KL, loss, _ = self.sess.run(
+                    [self.loss_ER, self.loss_KL, self.loss, self.train_op],
+                    feed_dict={self.input: batch_x, self.target: batch_y, self.batch_weight: batch_weight})
                 batch_y_pred = self.predict(batch_x)
                 batch_y_ = np.argmax(batch_y, axis=-1)
                 error = np.mean(batch_y_pred != batch_y_)
                 tend = time.time()
 
                 if j % (self.batch_size*20) == 0:
-                    # memory_str = "Epoch_{}:{:.2f}%|ER:{:.4f}|KL:{:.4f}|Loss:{:.4f}|Acc:{:.4f}|Time:{:.2f}".format(
-                    #     i, end/num_samples*100, loss_ER, loss_KL, loss, (1-error), tend-tstart)
-                    memory_str = "Epoch_{}:{:.2f}%|Loss:{:.4f}|Acc:{:.4f}|Time:{:.2f}".format(
-                        i, end/num_samples*100, loss, (1-error), tend-tstart)
-                    print(memory_str)
-                    self.logger.write(memory_str+"\n")
+                    content = dict(
+                        Epoch="{}_{:.2f}%".format(i, end/num_samples*100),
+                        ER="{:.4f}".format(loss_ER),
+                        KL="{:.4f}".format(loss_KL),
+                        Loss="{:.4f}".format(loss),
+                        Train_Acc="{:.4f}".format(1-error),
+                        Batch_Weight="{:.4f}".format(batch_weight),
+                        Time="{:.2f}".format(tend-tstart),
+                    )
+                    self.logger.write(content, content_type="train")
             if x_valid is not None and y_valid is not None:
                 y_valid_pred = self.predict(x_valid)
                 error = np.mean(y_valid_pred != y_valid_)
-                print("======Epoch:{}|Acc:{:.4f}=====".format(i, 1-error))
-        self.saver.save(self.sess, "logs/model/")
+                content = dict(
+                    Epoch="{}".format(i),
+                    Valid_Acc="{:.4f}".format(1-error)
+                )
+                memory_str = "===================Epoch:{}|Valid Acc:{:.4f}=====================".format(i, 1-error)
+                print(memory_str)
+                self.logger.write(content, content_type="valid", verbose=False)
+            stats = self.get_weight_uncertainty()
+            self.logger.write(stats, content_type="stats", verbose=False)
+        self.saver.save(self.sess, self.logger.save_path)
+        self.logger.dump()
+
+    def get_weight_uncertainty(self):
+        weight, mu, rho = self.sess.run([self.sample_weight_op, self.get_mus_op, self.get_rhos_op])
+        stats = {"weight": weight, "mu": mu, "rho": rho}
+        return stats
+
+    def test(self, x, y):
+        y_pred = self.predict(x)
+        y_true = np.argmax(y, axis=-1)
+        acc = np.mean(y_true == y_pred)
+        with open(os.path.join(self.logger.save_path, "test.txt"), "w") as f:
+            f.write("Test Acc:{:.4f}".format(acc))
+        print("==================Test Acc:{:.4f}==========================".format(acc))
