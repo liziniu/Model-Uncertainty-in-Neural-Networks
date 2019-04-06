@@ -2,6 +2,7 @@ import json
 import time
 import os
 import pandas as pd
+import pickle
 
 
 class Logger:
@@ -36,11 +37,16 @@ class Logger:
     def dump(self):
         if self.file_type == "json":
             for content_type in self.content:
-                file = open(os.path.join(self.save_path, "{}.json".format(content_type)), "w")
+                file = open(os.path.join(self.save_path, "{}.json".format(content_type)), "wb")
                 json.dump(self.content[content_type], file)
                 file.close()
         else:
             for content_type in self.content:
-                file = open(os.path.join(self.save_path, "{}.csv".format(content_type)), "w")
-                df = pd.DataFrame(self.content[content_type])
-                df.to_csv(file)
+                if content_type == "stats":
+                    file = open(os.path.join(self.save_path, "{}.pkl".format(content_type)), "wb")
+                    pickle.dump(self.content[content_type], file)
+                    file.close()
+                else:
+                    file = open(os.path.join(self.save_path, "{}.csv".format(content_type)), "w")
+                    df = pd.DataFrame(self.content[content_type])
+                    df.to_csv(file)

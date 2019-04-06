@@ -29,7 +29,12 @@ class Model:
         self.batch_weight = tf.placeholder(tf.float32, shape=[], name="batch_weight")
 
         self._build_layer()
-        self.opt = tf.train.AdamOptimizer(self.lr)
+        # self.opt = tf.train.AdamOptimizer(self.lr)
+        self.global_step = tf.Variable(0, trainable=False)
+        self.learning_rate = tf.maximum(
+            tf.train.exponential_decay(self.lr, self.global_step, 50000//self.batch_size, 0.97, staircase=True),
+            1e-4)
+        self.opt = tf.train.GradientDescentOptimizer(learning_rate=self.learning_rate)
 
         logits_act = self._forward(training=False)
         self.outputs = tf.argmax(logits_act, axis=-1)
@@ -54,9 +59,10 @@ class Model:
         self.loss = (loss_KL*self.batch_weight + loss_ER)/self.sample_times
         self.loss_KL = loss_KL/self.sample_times
         self.loss_ER = loss_ER/self.sample_times
-        self.train_op = self.opt.minimize(self.loss)
+        self.train_op = self.opt.minimize(self.loss, global_step=self.global_step)
 
         self.logger = Logger(save_path="logs/model1/", file_type="csv")
+        self.model_path = os.path.join(self.logger.save_path, "ckpt")
 
         self.saver = tf.train.Saver()
         self.initialize = False
@@ -158,6 +164,8 @@ class Model:
         if not self.initialize:
             self.sess.run(tf.global_variables_initializer())
             self.initialize = True
+        stats = self.get_weight_uncertainty()
+        self.logger.write(stats, content_type="stats", verbose=False)
 
         num_samples = len(x_train)
         num_batch = np.ceil(num_samples/self.batch_size)
@@ -170,15 +178,18 @@ class Model:
 
         for i in range(self.epochs):
             x_train, y_train = shuffle(x_train, y_train)
+            batch_weight = 1.0
             for j in range(0, num_samples, self.batch_size):
                 batch_id = j // self.batch_size + 1
-                batch_weight = 2**(num_batch - batch_id)/(2**num_batch - 1)
+                # batch_weight = 2**(num_batch - batch_id)/(2**num_batch - 1)
+                # if batch_id % 5 == 0:
+                #     batch_weight *= 0.95
                 tstart = time.time()
                 start = j
                 end = start + self.batch_size
                 batch_x, batch_y = x_train[start: end], y_train[start: end]
-                loss_ER, loss_KL, loss, _ = self.sess.run(
-                    [self.loss_ER, self.loss_KL, self.loss, self.train_op],
+                loss_ER, loss_KL, loss, lr, _ = self.sess.run(
+                    [self.loss_ER, self.loss_KL, self.loss, self.learning_rate, self.train_op],
                     feed_dict={self.input: batch_x, self.target: batch_y, self.batch_weight: batch_weight})
                 batch_y_pred = self.predict(batch_x)
                 batch_y_ = np.argmax(batch_y, axis=-1)
@@ -193,6 +204,7 @@ class Model:
                         Loss="{:.4f}".format(loss),
                         Train_Acc="{:.4f}".format(1-error),
                         Batch_Weight="{:.4f}".format(batch_weight),
+                        Learning_rate="{:.4f}".format(lr),
                         Time="{:.2f}".format(tend-tstart),
                     )
                     self.logger.write(content, content_type="train")
@@ -208,7 +220,7 @@ class Model:
                 self.logger.write(content, content_type="valid", verbose=False)
             stats = self.get_weight_uncertainty()
             self.logger.write(stats, content_type="stats", verbose=False)
-        self.saver.save(self.sess, self.logger.save_path)
+        self.saver.save(self.sess, self.model_path)
         self.logger.dump()
 
     def get_weight_uncertainty(self):

@@ -1,1 +1,1 @@
-python main.py --model 1 --train --epochs 2
+python main.py --model 1 --train --epochs 100
